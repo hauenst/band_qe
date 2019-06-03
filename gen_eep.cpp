@@ -11,56 +11,59 @@
 #include "TRandom3.h"
 #include "TVectorT.h"
 
-
 #include "constants.h"
 #include "spWf.h"
 #include "sigmaep_bound.h"
 
 using namespace std;
 
+// Functions to be used
 TVector3 makeVector( double mag, double theta, double phi );
 double getAngleBetween( double theta1, double phi1, double theta2, double phi2);
 double protonMag( double omega, double q2, double cosTheta_pq, double choice);
-// Foam Integrand for d(e,e'p) QE cross section
-class deepCS : public TFoamIntegrand
-{
+
+// Foam Integrand class for d(e,e'p) QE cross section
+class deepCS : public TFoamIntegrand{
 	public:
 		double Density(int nDim, double * args);
 };
 
-const double Ebeam 	= 10.6;
 // Ranges for generator
-const double min_theta_e = 4	*M_PI/180.;
-const double max_theta_e = 180.	*M_PI/180.;
-const double min_phi_e = 0.	*M_PI/180.;
-const double max_phi_e = 360.	*M_PI/180.;
-const double min_p_e = 0.1		  ;
-const double max_p_e = Ebeam		  ;
-const double min_theta_p = 0	*M_PI/180.;
-const double max_theta_p = 180.	*M_PI/180.;
-const double min_phi_p = 0.	*M_PI/180.;
-const double max_phi_p = 360.	*M_PI/180.;
+const double Ebeam 		= 10.6;
+const double min_theta_e 	= 4	*M_PI/180.;
+const double max_theta_e 	= 180.	*M_PI/180.;
+const double min_phi_e 		= 0.	*M_PI/180.;
+const double max_phi_e 		= 360.	*M_PI/180.;
+const double min_p_e 		= 0.1		  ;
+const double max_p_e 		= Ebeam		  ;
+const double min_theta_p 	= 0	*M_PI/180.;
+const double max_theta_p 	= 180.	*M_PI/180.;
+const double min_phi_p		= 0.	*M_PI/180.;
+const double max_phi_p 		= 360.	*M_PI/180.;
 
-// Initialize wavefunction
+// Initialize wavefunction class
 spWf * momDist = new spWf();
 // Initialize CC1 class
 sigmaep_bound * epCC1 = new sigmaep_bound();
 
 // Main
-int main(int argc, char ** argv)
-{
+int main(int argc, char ** argv){
+
 	if (argc<3){
 		cerr << "Wrong number of arguments used.\n\tPlease instead use: ./gen_eep [nEvents] [outputFile]\n";
 		return -1;
 	}
 
+	// Set up files
 	TFile * outFile = new TFile(argv[2],"RECREATE");
 	TTree * outTree = new TTree("MCout","Generator Output");
+	
+	// Set output branches
 	TVector3 pE,pP,pEbeam,pN,qOut;
-
 	double mom_pE,mom_pP,mom_pN,Ebeam_out;
 	double theta_pE,theta_pP,theta_pN;
 	double phi_pE,phi_pP,phi_pN;
+	double xB;
 	outTree->Branch("mom_pE", &mom_pE);
 	outTree->Branch("mom_pP", &mom_pP);
 	outTree->Branch("mom_pN", &mom_pN);
@@ -71,7 +74,6 @@ int main(int argc, char ** argv)
 	outTree->Branch("phi_pE", &phi_pE);
 	outTree->Branch("phi_pP", &phi_pP);
 	outTree->Branch("phi_pN", &phi_pN);
-	double xB;
 	outTree->Branch("xB",&xB);
 
 	// Initialize random number seed
@@ -79,8 +81,10 @@ int main(int argc, char ** argv)
 
 	// Create TFoam 
 	TFoam * csFoam = new TFoam("csFoam");
+
 	// Initialize our cross section for d(e,e'p)n QE
 	deepCS * csTotal = new deepCS();
+
 	// Set up Foam
 	csFoam->SetkDim(6);
 	csFoam->SetRho(csTotal);
@@ -88,7 +92,7 @@ int main(int argc, char ** argv)
 	// optional
 	csFoam->SetnCells(10000);
 	csFoam->SetnSampl(1000);
-	// initialize
+	// initialize -- this will run the cells specified above, see DENSITY function later in this code
 	csFoam->Initialize();
 	
 	// Create memory for each event
@@ -97,6 +101,7 @@ int main(int argc, char ** argv)
 	for (int i=0 ; i<nEvents ; i++){
 		if ( (i%1000) ==1) cerr << "Working on event " << i << "\n";
 
+		// Grab an event from our CS foam
 		csFoam->MakeEvent();
 		csFoam->GetMCvect(eventData);
 
@@ -118,7 +123,6 @@ int main(int argc, char ** argv)
 		double phi_q = phi_e - 180. * M_PI/180.;
 		double theta_q = acos( q.Z() / q.Mag() );
 
-
 		// Get angle between proton and q
 		double cosTheta_pq = getAngleBetween( theta_q, phi_q, theta_p, phi_p);
 			
@@ -130,7 +134,6 @@ int main(int argc, char ** argv)
 		TVector3 pN_init = q - pPrime;
 		TVector3 pP_init = pPrime - q;
 
-			
 		// Values to store in the generator tree
 		mom_pE = p_e;
 		mom_pP = p_p;
@@ -176,6 +179,8 @@ double getAngleBetween( double theta1, double phi1, double theta2, double phi2){
 }
 
 double protonMag( double omega, double q2, double cosTheta_pq, double choice){
+	// Solve for proton momentum given kinematics
+	
 	double x = mD + omega;
 	double y2 = x*x + mP*mP - mN*mN - q2;
 	
@@ -207,9 +212,9 @@ double protonMag( double omega, double q2, double cosTheta_pq, double choice){
 }
 
 
-double deepCS::Density(int nDim, double *args)
-{
-
+double deepCS::Density(int nDim, double *args){
+	// Returns CS sample -- used to generate our foam surface
+	
 	// Variables (there should be 6 of them)
 	double theta_e 	= min_theta_e + args[0]*(max_theta_e - min_theta_e);
 	double phi_e	= min_phi_e + args[1]*(max_phi_e - min_phi_e);
